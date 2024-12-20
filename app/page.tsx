@@ -1,101 +1,329 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState } from "react";
+import { Search } from "lucide-react";
+
+interface ArtworkItem {
+  id: number;
+  created_at: string;
+  updated_at: string;
+  version: string;
+  model_name: string;
+  model_id: number;
+  data: {
+    description: string;
+    generated_at: string;
+    image_url: string;
+  };
+  embedding: Record<string, unknown>;
+  distance: string;
+  embedding_type: string;
+  image_embedding_data?: {
+    description_generation_data: {
+      analysis_data: {
+        caption: string;
+        denseCaption: Array<{
+          text: string;
+          confidence: number;
+          boundingBox: {
+            x: number;
+            y: number;
+            w: number;
+            h: number;
+          };
+        }>;
+        tags: Array<{
+          name: string;
+          confidence: number;
+        }>;
+        objects: Array<{
+          boundingBox: {
+            x: number;
+            y: number;
+            w: number;
+            h: number;
+          };
+          tags: Array<{
+            name: string;
+            confidence: number;
+          }>;
+        }>;
+        peopleLocation: Array<{
+          boundingBox: {
+            x: number;
+            y: number;
+            w: number;
+            h: number;
+          };
+          confidence: number;
+        }>;
+      };
+      aic_description: string | null;
+    };
+    description: string;
+    generated_at: string;
+    image_url: string;
+  };
+}
+
+interface SimilarityScore {
+  embedding_type: string;
+  similarity_score: number;
+  items: {
+    id1: number;
+    id2: number;
+  };
+}
+
+interface SimilarityResults {
+  similarity_scores: SimilarityScore[];
+}
+
+interface SearchResults {
+  count: number;
+  items: ArtworkItem[];
+  model: string;
+  id: null;
+  total: number;
+}
+
+type QueryType = 'semantic' | 'nearest_neighbor' | 'similarity';
+
+export default function Page() {
+  const defaultApiUrl = 'https://api-test.artic.edu';
+  const [apiUrl, setApiUrl] = useState(defaultApiUrl);
+  const [queryType, setQueryType] = useState<QueryType>('semantic');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [artworkId, setArtworkId] = useState('');
+  const [compareId, setCompareId] = useState('');
+  const [results, setResults] = useState<SearchResults | SimilarityResults | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [debugUrl, setDebugUrl] = useState<string>('');
+
+  const handleSearch = async () => {
+    setResults(null);
+    setLoading(true);
+    setError(null);
+    setDebugUrl('');
+    
+    try {
+      const baseUrl = (apiUrl || defaultApiUrl).replace(/\/$/, '');
+      let apiPath: string;
+
+      switch (queryType) {
+        case 'semantic':
+          if (!searchQuery.trim()) {
+            throw new Error('Search query is required');
+          }
+          apiPath = `/ai/v1/artworks/search?q=${encodeURIComponent(searchQuery.trim())}`;
+          break;
+        case 'nearest_neighbor':
+          if (!artworkId.trim()) {
+            throw new Error('Artwork ID is required');
+          }
+          apiPath = `/ai/v1/artworks/${encodeURIComponent(artworkId.trim())}/nearest`;
+          break;
+        case 'similarity':
+          if (!artworkId.trim() || !compareId.trim()) {
+            throw new Error('Both artwork IDs are required for similarity search');
+          }
+          apiPath = `/ai/v1/artworks/${encodeURIComponent(artworkId.trim())}/similarity/${encodeURIComponent(compareId.trim())}`;
+          break;
+        default:
+          throw new Error('Invalid search type');
+      }
+
+      const url = `/api/artwork?path=${encodeURIComponent(apiPath)}`;
+      setDebugUrl(`${baseUrl}${apiPath}`);
+      
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || data.detail || 'Failed to fetch results');
+      }
+
+      setResults(data);
+    } catch (err) {
+      let errorMessage = 'Failed to fetch results';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      setError(errorMessage);
+      console.error('Search error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+    <div className="max-w-6xl mx-auto p-6">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-4 text-white-900">Artwork Search</h1>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+        <div className="mb-6">
+          <label className="block text-sm font-medium mb-2 text-gray-900">API URL</label>
+          <input
+            type="text"
+            value={apiUrl}
+            onChange={(e) => setApiUrl(e.target.value)}
+            placeholder={defaultApiUrl}
+            className="w-full p-2 border rounded-lg text-gray-900"
+          />
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-900">Search Type</label>
+            <select 
+              value={queryType}
+              onChange={(e) => setQueryType(e.target.value as QueryType)}
+              className="w-full p-2 border rounded-lg text-gray-900"
+            >
+              <option value="semantic">Semantic Search</option>
+              <option value="nearest_neighbor">Nearest Neighbor</option>
+              <option value="similarity">Similarity Search</option>
+            </select>
+          </div>
+
+          <div className="space-y-4">
+            {queryType === 'semantic' && (
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-900">Search Query</label>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Enter search terms..."
+                  className="w-full p-2 border rounded-lg text-gray-900"
+                />
+              </div>
+            )}
+
+            {(queryType === 'nearest_neighbor' || queryType === 'similarity') && (
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-900">Artwork ID</label>
+                <input
+                  type="text"
+                  value={artworkId}
+                  onChange={(e) => setArtworkId(e.target.value)}
+                  placeholder="Enter artwork ID..."
+                  className="w-full p-2 border rounded-lg text-gray-900"
+                />
+              </div>
+            )}
+
+            {queryType === 'similarity' && (
+              <div>
+                <label className="block text-sm font-medium mb-2 text-gray-900">Compare Artwork ID</label>
+                <input
+                  type="text"
+                  value={compareId}
+                  onChange={(e) => setCompareId(e.target.value)}
+                  placeholder="Enter comparison artwork ID..."
+                  className="w-full p-2 border rounded-lg text-gray-900"
+                />
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleSearch}
+            disabled={loading}
+            className="flex items-center justify-center w-full p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
+          >
+            {loading ? (
+              'Searching...'
+            ) : (
+              <>
+                <Search className="w-4 h-4 mr-2" />
+                Search
+              </>
+            )}
+          </button>
+        </div>
+
+        {debugUrl && (
+          <div className="mb-4 p-4 bg-gray-100 rounded-lg">
+            <p className="text-sm font-medium mb-1 text-gray-900">Request URL:</p>
+            <code className="text-sm break-all text-gray-900">{debugUrl}</code>
+          </div>
+        )}
+
+        {error && (
+          <div className="text-red-600 p-4 rounded-lg bg-red-50 mb-4">
+            {error}
+          </div>
+        )}
+
+        {results && (
+          <div className="space-y-6">
+            {'items' in results ? (
+              <>
+                <div className="text-sm text-gray-900">
+                  Found {results.count} results
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {results.items?.map((item) => (
+                    <div key={item.id} className="border rounded-lg overflow-hidden bg-white">
+                      <div className="p-4">
+                        {item.data?.image_url && (
+                          <div className="aspect-w-4 aspect-h-3 w-full">
+                            <img
+                              src={item.data.image_url}
+                              alt={item.data.description?.slice(0, 100) || "Artwork image"}
+                              className="w-full h-64 object-cover"
+                            />
+                          </div>
+                        )}
+                        <div className="text-sm mb-2 text-gray-900 pt-2">
+                          ID: {item.model_id}
+                        </div>
+                        {item.data.description && (
+                          <p className="text-sm mb-4 text-gray-900">
+                            <b>Description:</b> {item.data.description}
+                          </p>
+                        )}
+                        {item.distance && (
+                          <div className="text-sm text-blue-600">
+                            Distance: {parseFloat(item.distance).toFixed(4)}
+                          </div>
+                        )}
+                        {item.embedding_type && (
+                          <div className="text-sm text-gray-900">
+                            Type: {item.embedding_type}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <h2 className="text-xl font-semibold text-gray-900">Similarity Scores</h2>
+                {results.similarity_scores.map((score, index) => (
+                  <div key={index} className="border rounded-lg p-4 bg-white">
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="text-sm font-medium text-gray-900">
+                        Type: {score.embedding_type}
+                      </div>
+                      <div className="text-sm text-blue-600">
+                        Score: {score.similarity_score.toFixed(4)}
+                      </div>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      Artwork IDs: {score.items.id1} ↔ {score.items.id2}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
