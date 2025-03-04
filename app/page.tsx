@@ -122,7 +122,7 @@ export default function Page() {
           if (!artworkId.trim()) {
             throw new Error('Artwork ID is required');
           }
-          apiPath = `/ai/v1/artworks/${encodeURIComponent(artworkId.trim())}/nearest`;
+          apiPath = `/ai/v1/artworks/${encodeURIComponent(artworkId.trim())}/nearest?limit=30`;
           break;
         case 'similarity':
           if (!artworkId.trim() || !compareId.trim()) {
@@ -279,7 +279,7 @@ export default function Page() {
                           </div>
                         )}
                         <div className="text-sm mb-2 text-gray-900 pt-2">
-                          ID: {item.model_id}
+                          <a href={`https://artic.edu/artworks/${item.model_id}`}>ID: {item.model_id}</a>
                         </div>
                         {item.data.description && (
                           <p className="text-sm mb-4 text-gray-900">
