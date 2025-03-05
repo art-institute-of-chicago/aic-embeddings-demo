@@ -274,7 +274,7 @@ export default function Page() {
                             <img
                               src={item.data.image_url}
                               alt={item.data.description?.slice(0, 100) || "Artwork image"}
-                              className="w-full h-64 object-cover"
+                              className="w-full object-cover"
                             />
                           </div>
                         )}
