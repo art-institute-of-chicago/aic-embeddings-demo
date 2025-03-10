@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { Search } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import Image from "next/image";
 
 interface ArtworkItem {
   id: number;
@@ -89,7 +91,8 @@ interface SearchResults {
 
 type QueryType = 'semantic' | 'nearest_neighbor' | 'similarity';
 
-export default function Page() {
+// Wrapper component that uses searchParams
+function ArtworkSearchContent() {
   const defaultApiUrl = 'https://api-test.artic.edu';
   const [apiUrl, setApiUrl] = useState(defaultApiUrl);
   const [queryType, setQueryType] = useState<QueryType>('semantic');
@@ -100,16 +103,51 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debugUrl, setDebugUrl] = useState<string>('');
+  const [isSharedLink, setIsSharedLink] = useState(false);
 
-  const handleSearch = async () => {
+  const searchParams = useSearchParams();
+
+  // Function to update URL with current search parameters
+  const updateUrl = useCallback(() => {
+    const params = new URLSearchParams();
+    
+    params.set('type', queryType);
+    
+    if (queryType === 'semantic' && searchQuery) {
+      params.set('q', searchQuery);
+    }
+    
+    if ((queryType === 'nearest_neighbor' || queryType === 'similarity') && artworkId) {
+      params.set('id', artworkId);
+    }
+    
+    if (queryType === 'similarity' && compareId) {
+      params.set('compareId', compareId);
+    }
+    
+    if (apiUrl !== defaultApiUrl) {
+      params.set('api', apiUrl);
+    }
+    
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
+  }, [queryType, searchQuery, artworkId, compareId, apiUrl, defaultApiUrl]);
+
+  // Define search function
+  const handleSearch = useCallback(async (updateUrlFlag = true) => {
     setResults(null);
     setLoading(true);
     setError(null);
     setDebugUrl('');
     
+    if (updateUrlFlag) {
+      updateUrl();
+    }
+    
     try {
-      const baseUrl = (apiUrl || defaultApiUrl).replace(/\/$/, '');
-      let apiPath: string;
+      // Always use the current state values
+      const baseUrl = apiUrl.replace(/\/$/, '');
+      let apiPath = '';
 
       switch (queryType) {
         case 'semantic':
@@ -155,12 +193,166 @@ export default function Page() {
     } finally {
       setLoading(false);
     }
+  }, [queryType, searchQuery, artworkId, compareId, apiUrl, updateUrl]);
+
+  // Handle Enter key press in input fields
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSearch(true);
+    }
   };
+
+  const handleCopyShareLink = () => {
+    // Always update the URL before copying to ensure it reflects the current state
+    updateUrl();
+    
+    navigator.clipboard.writeText(window.location.href)
+      .then(() => {
+        alert('Share link copied to clipboard!');
+      })
+      .catch((err) => {
+        console.error('Failed to copy link:', err);
+        alert('Failed to copy link. Please copy the URL manually.');
+      });
+  };
+
+  // Load parameters from URL only on initial render
+  useEffect(() => {
+    const type = searchParams.get('type') as QueryType;
+    const query = searchParams.get('q');
+    const id = searchParams.get('id');
+    const compareIdParam = searchParams.get('compareId');
+    const api = searchParams.get('api');
+    
+    // Check if this is a shared link by seeing if any search params exist
+    const hasSearchParams = type || query || id || compareIdParam || api;
+    setIsSharedLink(!!hasSearchParams);
+    
+    // Update state with URL parameters
+    let stateUpdated = false;
+    
+    if (type && ['semantic', 'nearest_neighbor', 'similarity'].includes(type)) {
+      setQueryType(type as QueryType);
+      stateUpdated = true;
+    }
+    
+    if (query) {
+      setSearchQuery(query);
+      stateUpdated = true;
+    }
+    
+    if (id) {
+      setArtworkId(id);
+      stateUpdated = true;
+    }
+    
+    if (compareIdParam) {
+      setCompareId(compareIdParam);
+      stateUpdated = true;
+    }
+    
+    if (api) {
+      setApiUrl(api);
+      stateUpdated = true;
+    }
+    
+    // Wait for state updates to complete before running search
+    if (stateUpdated) {
+      // Auto-run search if we have the necessary parameters
+      const shouldRunSearch = 
+        (type === 'semantic' && query) || 
+        (type === 'nearest_neighbor' && id) || 
+        (type === 'similarity' && id && compareIdParam);
+        
+      if (shouldRunSearch) {
+        // Create a version of handleSearch that uses the URL parameters directly
+        const runInitialSearch = async () => {
+          setResults(null);
+          setLoading(true);
+          setError(null);
+          
+          try {
+            const baseUrl = (api || defaultApiUrl).replace(/\/$/, '');
+            let apiPath = '';
+
+            switch (type) {
+              case 'semantic':
+                if (!query?.trim()) {
+                  throw new Error('Search query is required');
+                }
+                apiPath = `/ai/v1/artworks/search?q=${encodeURIComponent(query.trim())}`;
+                break;
+              case 'nearest_neighbor':
+                if (!id?.trim()) {
+                  throw new Error('Artwork ID is required');
+                }
+                apiPath = `/ai/v1/artworks/${encodeURIComponent(id.trim())}/nearest?limit=30`;
+                break;
+              case 'similarity':
+                if (!id?.trim() || !compareIdParam?.trim()) {
+                  throw new Error('Both artwork IDs are required for similarity search');
+                }
+                apiPath = `/ai/v1/artworks/${encodeURIComponent(id.trim())}/similarity/${encodeURIComponent(compareIdParam.trim())}`;
+                break;
+              default:
+                throw new Error('Invalid search type');
+            }
+
+            const url = `/api/artwork?path=${encodeURIComponent(apiPath)}`;
+            setDebugUrl(`${baseUrl}${apiPath}`);
+            
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(data.error || data.detail || 'Failed to fetch results');
+            }
+
+            setResults(data);
+          } catch (err) {
+            let errorMessage = 'Failed to fetch results';
+            if (err instanceof Error) {
+              errorMessage = err.message;
+            }
+            setError(errorMessage);
+            console.error('Search error:', err);
+          } finally {
+            setLoading(false);
+          }
+        };
+        
+        // Use a timeout to ensure state updates have completed
+        setTimeout(runInitialSearch, 100);
+      }
+    }
+  // Only run this effect once on mount - empty dependency array
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="max-w-6xl mx-auto p-6">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-4 text-white-900">Artwork Search</h1>
+        <div className="flex justify-between items-center mb-4">
+          <h1 className="text-3xl font-bold text-white-900">Artwork Search</h1>
+          {isSharedLink && (
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
+                Shared Search Loaded
+              </div>
+              <button 
+                onClick={() => {
+                  // Clear the URL but keep the current form values
+                  window.history.pushState({}, '', window.location.pathname);
+                  setIsSharedLink(false);
+                }}
+                className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded-full"
+              >
+                Clear URL
+              </button>
+            </div>
+          )}
+        </div>
 
         <div className="mb-6">
           <label className="block text-sm font-medium mb-2 text-gray-900">API URL</label>
@@ -168,6 +360,7 @@ export default function Page() {
             type="text"
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
+            onKeyPress={handleKeyPress}
             placeholder={defaultApiUrl}
             className="w-full p-2 border rounded-lg text-gray-900"
           />
@@ -195,6 +388,7 @@ export default function Page() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={handleKeyPress}
                   placeholder="Enter search terms..."
                   className="w-full p-2 border rounded-lg text-gray-900"
                 />
@@ -208,6 +402,7 @@ export default function Page() {
                   type="text"
                   value={artworkId}
                   onChange={(e) => setArtworkId(e.target.value)}
+                  onKeyPress={handleKeyPress}
                   placeholder="Enter artwork ID..."
                   className="w-full p-2 border rounded-lg text-gray-900"
                 />
@@ -221,6 +416,7 @@ export default function Page() {
                   type="text"
                   value={compareId}
                   onChange={(e) => setCompareId(e.target.value)}
+                  onKeyPress={handleKeyPress}
                   placeholder="Enter comparison artwork ID..."
                   className="w-full p-2 border rounded-lg text-gray-900"
                 />
@@ -229,7 +425,7 @@ export default function Page() {
           </div>
 
           <button
-            onClick={handleSearch}
+            onClick={() => handleSearch(true)}
             disabled={loading}
             className="flex items-center justify-center w-full p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
           >
@@ -246,8 +442,18 @@ export default function Page() {
 
         {debugUrl && (
           <div className="mb-4 p-4 bg-gray-100 rounded-lg">
-            <p className="text-sm font-medium mb-1 text-gray-900">Request URL:</p>
-            <code className="text-sm break-all text-gray-900">{debugUrl}</code>
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm font-medium mb-1 text-gray-900">Request URL:</p>
+                <code className="text-sm break-all text-gray-900">{debugUrl}</code>
+              </div>
+              <button
+                onClick={handleCopyShareLink}
+                className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 flex items-center"
+              >
+                Copy Share Link
+              </button>
+            </div>
           </div>
         )}
 
@@ -271,10 +477,13 @@ export default function Page() {
                       <div className="p-4">
                         {item.data?.image_url && (
                           <div className="aspect-w-4 aspect-h-3 w-full">
-                            <img
+                            <Image
                               src={item.data.image_url}
                               alt={item.data.description?.slice(0, 100) || "Artwork image"}
                               className="w-full object-cover"
+                              width={300}
+                              height={225}
+                              unoptimized
                             />
                           </div>
                         )}
@@ -325,5 +534,28 @@ export default function Page() {
         )}
       </div>
     </div>
+  );
+}
+
+// Loading fallback for Suspense
+function SearchLoading() {
+  return (
+    <div className="max-w-6xl mx-auto p-6">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-4 text-white-900">Artwork Search</h1>
+        <div className="flex items-center justify-center h-40">
+          <div className="text-lg">Loading search parameters...</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Main component that wraps the content in Suspense
+export default function Page() {
+  return (
+    <Suspense fallback={<SearchLoading />}>
+      <ArtworkSearchContent />
+    </Suspense>
   );
 }
