@@ -4,11 +4,15 @@ export async function GET(request: Request) {
   try {
     // Get the search params
     const { searchParams } = new URL(request.url);
-    const baseUrl = searchParams.get('baseUrl') || 'https://api-test.artic.edu';
+    const baseUrl = searchParams.get('apiUrl');
     const path = searchParams.get('path');
 
     if (!path) {
       return NextResponse.json({ error: 'Path is required' }, { status: 400 });
+    }
+
+    if (!baseUrl) {
+      return NextResponse.json({ error: 'API URL is required' }, { status: 400 });
     }
 
     // Construct the full URL
@@ -33,7 +37,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error('API Error:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch results' }, 
+      { error: 'Failed to fetch results' },
       { status: 500 }
     );
   }

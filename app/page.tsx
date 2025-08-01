@@ -89,7 +89,8 @@ interface SearchResults {
   total: number;
 }
 
-type QueryType = 'semantic' | 'nearest_neighbor' | 'similarity';
+type QueryType = 'semantic' | 'nearest_neighbor' | 'compare' | 'between';
+type ComparisonType = 'text' | 'image';
 
 // Wrapper component that uses searchParams
 function ArtworkSearchContent() {
@@ -99,6 +100,9 @@ function ArtworkSearchContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [artworkId, setArtworkId] = useState('');
   const [compareId, setCompareId] = useState('');
+  const [comparisonType, setComparisonType] = useState<ComparisonType>('text');
+  const [firstArtworkType, setFirstArtworkType] = useState<ComparisonType>('text');
+  const [secondArtworkType, setSecondArtworkType] = useState<ComparisonType>('text');
   const [results, setResults] = useState<SearchResults | SimilarityResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,28 +114,37 @@ function ArtworkSearchContent() {
   // Function to update URL with current search parameters
   const updateUrl = useCallback(() => {
     const params = new URLSearchParams();
-    
+
     params.set('type', queryType);
-    
+
     if (queryType === 'semantic' && searchQuery) {
       params.set('q', searchQuery);
     }
-    
-    if ((queryType === 'nearest_neighbor' || queryType === 'similarity') && artworkId) {
+
+    if ((queryType === 'nearest_neighbor' || queryType === 'compare' || queryType === 'between') && artworkId) {
       params.set('id', artworkId);
     }
-    
-    if (queryType === 'similarity' && compareId) {
+
+    if ((queryType === 'compare' || queryType === 'between') && compareId) {
       params.set('compareId', compareId);
     }
-    
-    if (apiUrl !== defaultApiUrl) {
-      params.set('api', apiUrl);
+
+    if (queryType === 'between' && comparisonType) {
+      params.set('comparisonType', comparisonType);
     }
-    
+
+    if (queryType === 'compare') {
+      params.set('firstArtworkType', firstArtworkType);
+      params.set('secondArtworkType', secondArtworkType);
+    }
+
+    if (apiUrl !== defaultApiUrl) {
+      params.set('apiUrl', apiUrl);
+    }
+
     const newUrl = `${window.location.pathname}?${params.toString()}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
-  }, [queryType, searchQuery, artworkId, compareId, apiUrl, defaultApiUrl]);
+  }, [queryType, searchQuery, artworkId, compareId, comparisonType, apiUrl, defaultApiUrl]);
 
   // Define search function
   const handleSearch = useCallback(async (updateUrlFlag = true) => {
@@ -139,11 +152,11 @@ function ArtworkSearchContent() {
     setLoading(true);
     setError(null);
     setDebugUrl('');
-    
+
     if (updateUrlFlag) {
       updateUrl();
     }
-    
+
     try {
       // Always use the current state values
       const baseUrl = apiUrl.replace(/\/$/, '');
@@ -162,19 +175,25 @@ function ArtworkSearchContent() {
           }
           apiPath = `/ai/v1/artworks/${encodeURIComponent(artworkId.trim())}/nearest?limit=30`;
           break;
-        case 'similarity':
+        case 'compare':
           if (!artworkId.trim() || !compareId.trim()) {
-            throw new Error('Both artwork IDs are required for similarity search');
+            throw new Error('Both artwork IDs are required for compare search');
           }
-          apiPath = `/ai/v1/artworks/${encodeURIComponent(artworkId.trim())}/similarity/${encodeURIComponent(compareId.trim())}`;
+          apiPath = `/ai/v1/${firstArtworkType}/artworks/${encodeURIComponent(artworkId.trim())}/compare/${secondArtworkType}/artworks/${encodeURIComponent(compareId.trim())}`;
+          break;
+        case 'between':
+          if (!artworkId.trim() || !compareId.trim()) {
+            throw new Error('Both artwork IDs are required for between search');
+          }
+          apiPath = `/ai/v1/${comparisonType}/artworks/${encodeURIComponent(artworkId.trim())}/between/artworks/${encodeURIComponent(compareId.trim())}`;
           break;
         default:
           throw new Error('Invalid search type');
       }
 
-      const url = `/api/artwork?path=${encodeURIComponent(apiPath)}`;
+      const url = `/api/artwork?path=${encodeURIComponent(apiPath)}&apiUrl=${encodeURIComponent(baseUrl)}`;
       setDebugUrl(`${baseUrl}${apiPath}`);
-      
+
       const response = await fetch(url);
       const data = await response.json();
 
@@ -193,7 +212,7 @@ function ArtworkSearchContent() {
     } finally {
       setLoading(false);
     }
-  }, [queryType, searchQuery, artworkId, compareId, apiUrl, updateUrl]);
+  }, [queryType, searchQuery, artworkId, compareId, comparisonType, firstArtworkType, secondArtworkType, apiUrl, updateUrl]);
 
   // Handle Enter key press in input fields
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -206,7 +225,7 @@ function ArtworkSearchContent() {
   const handleCopyShareLink = () => {
     // Always update the URL before copying to ensure it reflects the current state
     updateUrl();
-    
+
     navigator.clipboard.writeText(window.location.href)
       .then(() => {
         alert('Share link copied to clipboard!');
@@ -223,57 +242,76 @@ function ArtworkSearchContent() {
     const query = searchParams.get('q');
     const id = searchParams.get('id');
     const compareIdParam = searchParams.get('compareId');
-    const api = searchParams.get('api');
-    
+    const apiUrlParam = searchParams.get('apiUrl');
+    const comparisonTypeParam = searchParams.get('comparisonType') as ComparisonType;
+    const firstArtworkTypeParam = searchParams.get('firstArtworkType') as ComparisonType;
+    const secondArtworkTypeParam = searchParams.get('secondArtworkType') as ComparisonType;
+
     // Check if this is a shared link by seeing if any search params exist
-    const hasSearchParams = type || query || id || compareIdParam || api;
+    const hasSearchParams = type || query || id || compareIdParam || apiUrlParam || comparisonTypeParam || firstArtworkTypeParam || secondArtworkTypeParam;
     setIsSharedLink(!!hasSearchParams);
-    
+
     // Update state with URL parameters
     let stateUpdated = false;
-    
-    if (type && ['semantic', 'nearest_neighbor', 'similarity'].includes(type)) {
+
+    if (type && ['semantic', 'nearest_neighbor', 'compare', 'between'].includes(type)) {
       setQueryType(type as QueryType);
       stateUpdated = true;
     }
-    
+
     if (query) {
       setSearchQuery(query);
       stateUpdated = true;
     }
-    
+
     if (id) {
       setArtworkId(id);
       stateUpdated = true;
     }
-    
+
     if (compareIdParam) {
       setCompareId(compareIdParam);
       stateUpdated = true;
     }
-    
-    if (api) {
-      setApiUrl(api);
+
+    if (comparisonTypeParam && ['text', 'image'].includes(comparisonTypeParam)) {
+      setComparisonType(comparisonTypeParam);
       stateUpdated = true;
     }
-    
+
+    if (firstArtworkTypeParam && ['text', 'image'].includes(firstArtworkTypeParam)) {
+      setFirstArtworkType(firstArtworkTypeParam);
+      stateUpdated = true;
+    }
+
+    if (secondArtworkTypeParam && ['text', 'image'].includes(secondArtworkTypeParam)) {
+      setSecondArtworkType(secondArtworkTypeParam);
+      stateUpdated = true;
+    }
+
+    if (apiUrlParam) {
+      setApiUrl(apiUrlParam);
+      stateUpdated = true;
+    }
+
     // Wait for state updates to complete before running search
     if (stateUpdated) {
       // Auto-run search if we have the necessary parameters
-      const shouldRunSearch = 
-        (type === 'semantic' && query) || 
-        (type === 'nearest_neighbor' && id) || 
-        (type === 'similarity' && id && compareIdParam);
-        
+      const shouldRunSearch =
+        (type === 'semantic' && query) ||
+        (type === 'nearest_neighbor' && id) ||
+        (type === 'compare' && id && compareIdParam) ||
+        (type === 'between' && id && compareIdParam);
+
       if (shouldRunSearch) {
         // Create a version of handleSearch that uses the URL parameters directly
         const runInitialSearch = async () => {
           setResults(null);
           setLoading(true);
           setError(null);
-          
+
           try {
-            const baseUrl = (api || defaultApiUrl).replace(/\/$/, '');
+            const baseUrl = (apiUrlParam || defaultApiUrl).replace(/\/$/, '');
             let apiPath = '';
 
             switch (type) {
@@ -289,19 +327,28 @@ function ArtworkSearchContent() {
                 }
                 apiPath = `/ai/v1/artworks/${encodeURIComponent(id.trim())}/nearest?limit=30`;
                 break;
-              case 'similarity':
+              case 'compare':
                 if (!id?.trim() || !compareIdParam?.trim()) {
-                  throw new Error('Both artwork IDs are required for similarity search');
+                  throw new Error('Both artwork IDs are required for compare search');
                 }
-                apiPath = `/ai/v1/artworks/${encodeURIComponent(id.trim())}/similarity/${encodeURIComponent(compareIdParam.trim())}`;
+                const firstType = firstArtworkTypeParam || 'text';
+                const secondType = secondArtworkTypeParam || 'text';
+                apiPath = `/ai/v1/${firstType}/artworks/${encodeURIComponent(id.trim())}/compare/${secondType}/artworks/${encodeURIComponent(compareIdParam.trim())}`;
+                break;
+              case 'between':
+                if (!id?.trim() || !compareIdParam?.trim()) {
+                  throw new Error('Both artwork IDs are required for between search');
+                }
+                const betweenType = comparisonTypeParam || 'text';
+                apiPath = `/ai/v1/${betweenType}/artworks/${encodeURIComponent(id.trim())}/between/artworks/${encodeURIComponent(compareIdParam.trim())}`;
                 break;
               default:
                 throw new Error('Invalid search type');
             }
 
-            const url = `/api/artwork?path=${encodeURIComponent(apiPath)}`;
+            const url = `/api/artwork?path=${encodeURIComponent(apiPath)}&apiUrl=${encodeURIComponent(baseUrl)}`;
             setDebugUrl(`${baseUrl}${apiPath}`);
-            
+
             const response = await fetch(url);
             const data = await response.json();
 
@@ -321,7 +368,7 @@ function ArtworkSearchContent() {
             setLoading(false);
           }
         };
-        
+
         // Use a timeout to ensure state updates have completed
         setTimeout(runInitialSearch, 100);
       }
@@ -340,7 +387,7 @@ function ArtworkSearchContent() {
               <div className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
                 Shared Search Loaded
               </div>
-              <button 
+              <button
                 onClick={() => {
                   // Clear the URL but keep the current form values
                   window.history.pushState({}, '', window.location.pathname);
@@ -355,7 +402,7 @@ function ArtworkSearchContent() {
         </div>
 
         <div className="mb-6">
-          <label className="block text-sm font-medium mb-2 text-gray-900">API URL</label>
+          <label className="block text-sm font-medium mb-2 text-white-900">API URL</label>
           <input
             type="text"
             value={apiUrl}
@@ -365,25 +412,26 @@ function ArtworkSearchContent() {
             className="w-full p-2 border rounded-lg text-gray-900"
           />
         </div>
-        
+
         <div className="space-y-4 mb-6">
           <div>
-            <label className="block text-sm font-medium mb-2 text-gray-900">Search Type</label>
-            <select 
+            <label className="block text-sm font-medium mb-2 text-white-900">Search Type</label>
+            <select
               value={queryType}
               onChange={(e) => setQueryType(e.target.value as QueryType)}
               className="w-full p-2 border rounded-lg text-gray-900"
             >
               <option value="semantic">Semantic Search</option>
               <option value="nearest_neighbor">Nearest Neighbor</option>
-              <option value="similarity">Similarity Search</option>
+              <option value="compare">Compare</option>
+              <option value="between">Between</option>
             </select>
           </div>
 
           <div className="space-y-4">
             {queryType === 'semantic' && (
               <div>
-                <label className="block text-sm font-medium mb-2 text-gray-900">Search Query</label>
+                <label className="block text-sm font-medium mb-2 text-white-900">Search Query</label>
                 <input
                   type="text"
                   value={searchQuery}
@@ -395,9 +443,9 @@ function ArtworkSearchContent() {
               </div>
             )}
 
-            {(queryType === 'nearest_neighbor' || queryType === 'similarity') && (
+            {(queryType === 'nearest_neighbor' || queryType === 'compare' || queryType === 'between') && (
               <div>
-                <label className="block text-sm font-medium mb-2 text-gray-900">Artwork ID</label>
+                <label className="block text-sm font-medium mb-2 text-white-900">Artwork ID</label>
                 <input
                   type="text"
                   value={artworkId}
@@ -409,18 +457,59 @@ function ArtworkSearchContent() {
               </div>
             )}
 
-            {queryType === 'similarity' && (
-              <div>
-                <label className="block text-sm font-medium mb-2 text-gray-900">Compare Artwork ID</label>
-                <input
-                  type="text"
-                  value={compareId}
-                  onChange={(e) => setCompareId(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Enter comparison artwork ID..."
-                  className="w-full p-2 border rounded-lg text-gray-900"
-                />
-              </div>
+            {(queryType === 'compare' || queryType === 'between') && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium mb-2 text-white-900">Compare Artwork ID</label>
+                  <input
+                    type="text"
+                    value={compareId}
+                    onChange={(e) => setCompareId(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Enter comparison artwork ID..."
+                    className="w-full p-2 border rounded-lg text-gray-900"
+                  />
+                </div>
+
+                {queryType === 'compare' ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2 text-white-900">First Artwork Vector Type</label>
+                      <select
+                        value={firstArtworkType}
+                        onChange={(e) => setFirstArtworkType(e.target.value as ComparisonType)}
+                        className="w-full p-2 border rounded-lg text-gray-900"
+                      >
+                        <option value="text">Text</option>
+                        <option value="image">Image</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2 text-white-900">Second Artwork Vector Type</label>
+                      <select
+                        value={secondArtworkType}
+                        onChange={(e) => setSecondArtworkType(e.target.value as ComparisonType)}
+                        className="w-full p-2 border rounded-lg text-gray-900"
+                      >
+                        <option value="text">Text</option>
+                        <option value="image">Image</option>
+                      </select>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium mb-2 text-white-900">Comparison Type</label>
+                    <select
+                      value={comparisonType}
+                      onChange={(e) => setComparisonType(e.target.value as ComparisonType)}
+                      className="w-full p-2 border rounded-lg text-gray-900"
+                    >
+                      <option value="text">Text</option>
+                      <option value="image">Image</option>
+                    </select>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -470,7 +559,7 @@ function ArtworkSearchContent() {
                 <div className="text-sm text-gray-900">
                   Found {results.count} results
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {results.items?.map((item) => (
                     <div key={item.id} className="border rounded-lg overflow-hidden bg-white">
