@@ -23,7 +23,7 @@ export async function GET(request: Request) {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
-        'Content-Type': 'application/json'
+        'Authorization': 'Bearer gKkzrOv5W5552YtMKON0nbIQe2aPw9MS'
       }
     });
 
